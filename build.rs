@@ -11,6 +11,7 @@ fn main() {
     println!("cargo:rerun-if-changed=Package.resolved");
     println!("cargo:rerun-if-env-changed=FLUIDAUDIO_SWIFT_BUILD_DIR");
     println!("cargo:rerun-if-env-changed=FLUIDAUDIO_SWIFT_SHARED_CACHE");
+    println!("cargo:rerun-if-env-changed=CI");
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -61,7 +62,10 @@ fn main() {
     let lib_path = swift_build_dir.join(config);
     let lib_file = lib_path.join(LIB_FILE);
     if !lib_file.is_file() {
-        panic!("Swift build succeeded but {} is missing", lib_file.display());
+        panic!(
+            "Swift build succeeded but {} is missing",
+            lib_file.display()
+        );
     }
     // A shared cache can be cleaned while an older target dir still points at it. Rerun
     // (a no-op if the cache is intact, a rebuild if it is gone) whenever the library
@@ -119,6 +123,10 @@ fn swift_build(manifest_dir: &Path, scratch: &Path, config: &str) -> Result<(), 
 /// `$HOME/Library/Caches/fluidaudio-rs`. `FLUIDAUDIO_SWIFT_SHARED_CACHE=0` turns sharing
 /// off (SwiftPM output stays under `OUT_DIR`, as in the stock build script).
 ///
+/// CI runners (`CI` set, as GitHub Actions does) keep the stock behaviour unless
+/// `FLUIDAUDIO_SWIFT_BUILD_DIR` is set explicitly: they cache the Cargo target dir, which
+/// must therefore contain the Swift output, and release builds stay hermetic.
+///
 /// The directory used is `<base>/<key>`, where the key hashes everything that decides
 /// what SwiftPM produces: the package location (a git checkout path contains the
 /// revision), the contents of `Package.swift` / `Package.resolved`, and the Swift
@@ -133,7 +141,14 @@ fn shared_scratch_dir(manifest_dir: &Path) -> Option<PathBuf> {
         return None;
     }
 
-    let base = match env_nonempty("FLUIDAUDIO_SWIFT_BUILD_DIR") {
+    let explicit = env_nonempty("FLUIDAUDIO_SWIFT_BUILD_DIR");
+    if explicit.is_none()
+        && env_nonempty("CI").is_some_and(|v| !matches!(v.as_str(), "0" | "false"))
+    {
+        return None;
+    }
+
+    let base = match explicit {
         Some(dir) => {
             let dir = PathBuf::from(dir);
             assert!(
